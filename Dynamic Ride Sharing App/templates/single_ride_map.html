@@ -1,0 +1,663 @@
+{% extends "base.html" %}
+
+{% block title %}Accepted Ride - Navigate to Pickup{% endblock %}
+
+{% block content %}
+<div class="container">
+    <!-- Header -->
+    <div class="ride-header">
+        <div class="header-content">
+            <h1>🚗 Ride Accepted!</h1>
+            <p class="passenger-name">Picking up: <strong>{{ ride.user_name }}</strong></p>
+        </div>
+        <div class="status-badge accepted">
+            <span>✓</span> Accepted
+        </div>
+    </div>
+    
+    <!-- Navigation Instructions -->
+    <div class="nav-instructions">
+        <div class="instruction-step active">
+            <div class="step-icon">📍</div>
+            <div class="step-content">
+                <h3>Step 1: Navigate to Pickup</h3>
+                <p class="route-detail">{{ rider_city }} → {{ ride.source }}</p>
+                <div class="step-stats">
+                    <span class="stat">📏 {{ rider_to_pickup_distance }} km</span>
+                    <span class="stat">⏱️ ~{{ (rider_to_pickup_distance / 40 * 60)|round|int }} min</span>
+                </div>
+            </div>
+        </div>
+        <div class="instruction-arrow">↓</div>
+        <div class="instruction-step">
+            <div class="step-icon">🚗</div>
+            <div class="step-content">
+                <h3>Step 2: Pick up passenger</h3>
+                <p class="route-detail">At {{ ride.source }}</p>
+            </div>
+        </div>
+        <div class="instruction-arrow">↓</div>
+        <div class="instruction-step">
+            <div class="step-icon">🏁</div>
+            <div class="step-content">
+                <h3>Step 3: Drop off at destination</h3>
+                <p class="route-detail">{{ ride.source }} → {{ ride.destination }}</p>
+                <p class="via-text">Via: {{ ride.path }}</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Map Container -->
+    <div id="map"></div>
+    
+    <!-- Route Summary -->
+    <div class="route-summary">
+        <h3>📊 Trip Summary</h3>
+        <div class="summary-cards">
+            <div class="summary-card">
+                <div class="card-icon">🏍️</div>
+                <div class="card-content">
+                    <div class="card-label">Your Location</div>
+                    <div class="card-value">{{ rider_city }}</div>
+                </div>
+            </div>
+            <div class="summary-card highlighted">
+                <div class="card-icon">📍</div>
+                <div class="card-content">
+                    <div class="card-label">Pickup Point</div>
+                    <div class="card-value">{{ ride.source }}</div>
+                </div>
+            </div>
+            <div class="summary-card">
+                <div class="card-icon">🏁</div>
+                <div class="card-content">
+                    <div class="card-label">Destination</div>
+                    <div class="card-value">{{ ride.destination }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Color Legend -->
+    <div class="color-legend">
+        <h4>🎨 Route Colors</h4>
+        <div class="legend-list">
+            <div class="legend-item">
+                <div class="legend-line" style="background: #3b82f6;"></div>
+                <span>Rider to Pickup ({{ rider_to_pickup_distance }} km)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-line" style="background: #10b981;"></div>
+                <span>Passenger Route (Pickup to Destination)</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Actions -->
+    <div class="actions">
+        <a href="{{ url_for('rider_dashboard') }}" class="btn btn-secondary">
+            ← Back to Dashboard
+        </a>
+        <button class="btn btn-primary" id="startNavigationBtn">
+            🧭 Start Navigation
+        </button>
+    </div>
+</div>
+
+<!-- OpenLayers CSS & JS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v9.2.4/ol.css">
+<script src="https://cdn.jsdelivr.net/npm/ol@v9.2.4/dist/ol.js"></script>
+
+<script>
+    // Get data from Flask
+    const riderLocation = {{ rider_location|tojson }};
+    const riderCity = "{{ rider_city }}";
+    const riderToPickupCoords = {{ rider_to_pickup_coords|tojson }};
+    const userCoords = {{ user_coords|tojson }};
+    const pickupPoint = "{{ ride.source }}";
+    const destination = "{{ ride.destination }}";
+    
+    console.log('🗺️ Initializing single ride map...');
+    console.log('Rider Location:', riderLocation);
+    console.log('Rider to Pickup:', riderToPickupCoords);
+    console.log('User Route:', userCoords);
+    
+    // Create map
+    const osmLayer = new ol.layer.Tile({
+        source: new ol.source.OSM()
+    });
+    
+    // Convert rider location
+    const riderCoord = ol.proj.fromLonLat([riderLocation.lon, riderLocation.lat]);
+    
+    // Create rider to pickup route (BLUE)
+    const riderRouteCoords = riderToPickupCoords.map(coord => 
+        ol.proj.fromLonLat([coord[1], coord[0]])
+    );
+    
+    const riderRouteFeature = new ol.Feature({
+        geometry: new ol.geom.LineString(riderRouteCoords)
+    });
+    
+    riderRouteFeature.setStyle(new ol.style.Style({
+        stroke: new ol.style.Stroke({
+            color: '#3b82f6',
+            width: 8,
+            lineCap: 'round',
+            lineJoin: 'round'
+        })
+    }));
+    
+    // Create user route (GREEN)
+    const userRouteCoords = userCoords.map(coord => 
+        ol.proj.fromLonLat([coord[1], coord[0]])
+    );
+    
+    const userRouteFeature = new ol.Feature({
+        geometry: new ol.geom.LineString(userRouteCoords)
+    });
+    
+    userRouteFeature.setStyle(new ol.style.Style({
+        stroke: new ol.style.Stroke({
+            color: '#10b981',
+            width: 8,
+            lineCap: 'round',
+            lineJoin: 'round'
+        })
+    }));
+    
+    // Create route layers
+    const riderRouteLayer = new ol.layer.Vector({
+        source: new ol.source.Vector({
+            features: [riderRouteFeature]
+        }),
+        zIndex: 1
+    });
+    
+    const userRouteLayer = new ol.layer.Vector({
+        source: new ol.source.Vector({
+            features: [userRouteFeature]
+        }),
+        zIndex: 1
+    });
+    
+    // Create markers
+    const markers = [];
+    
+    // Rider marker (Purple bike)
+    const riderMarker = new ol.Feature({
+        geometry: new ol.geom.Point(riderCoord),
+        name: 'Your Location',
+        type: 'rider'
+    });
+    
+    riderMarker.setStyle(new ol.style.Style({
+        image: new ol.style.Circle({
+            radius: 18,
+            fill: new ol.style.Fill({ color: '#8b5cf6' }),
+            stroke: new ol.style.Stroke({ color: '#ffffff', width: 4 })
+        }),
+        text: new ol.style.Text({
+            text: '🏍️',
+            font: '24px sans-serif'
+        })
+    }));
+    
+    markers.push(riderMarker);
+    
+    // Pickup marker (Blue)
+    const pickupCoord = ol.proj.fromLonLat([userCoords[0][1], userCoords[0][0]]);
+    const pickupMarker = new ol.Feature({
+        geometry: new ol.geom.Point(pickupCoord),
+        name: pickupPoint,
+        type: 'pickup'
+    });
+    
+    pickupMarker.setStyle(new ol.style.Style({
+        image: new ol.style.Circle({
+            radius: 20,
+            fill: new ol.style.Fill({ color: '#3b82f6' }),
+            stroke: new ol.style.Stroke({ color: '#ffffff', width: 4 })
+        }),
+        text: new ol.style.Text({
+            text: '📍',
+            font: '24px sans-serif'
+        })
+    }));
+    
+    markers.push(pickupMarker);
+    
+    // Destination marker (Red)
+    const destCoord = ol.proj.fromLonLat([userCoords[userCoords.length-1][1], userCoords[userCoords.length-1][0]]);
+    const destMarker = new ol.Feature({
+        geometry: new ol.geom.Point(destCoord),
+        name: destination,
+        type: 'destination'
+    });
+    
+    destMarker.setStyle(new ol.style.Style({
+        image: new ol.style.Circle({
+            radius: 20,
+            fill: new ol.style.Fill({ color: '#ef4444' }),
+            stroke: new ol.style.Stroke({ color: '#ffffff', width: 4 })
+        }),
+        text: new ol.style.Text({
+            text: '🏁',
+            font: '24px sans-serif'
+        })
+    }));
+    
+    markers.push(destMarker);
+    
+    // Create marker layer
+    const markerLayer = new ol.layer.Vector({
+        source: new ol.source.Vector({
+            features: markers
+        }),
+        zIndex: 2
+    });
+    
+    // Create map
+    const map = new ol.Map({
+        target: 'map',
+        layers: [osmLayer, riderRouteLayer, userRouteLayer, markerLayer],
+        view: new ol.View({
+            center: riderCoord,
+            zoom: 10
+        })
+    });
+    
+    // Fit to show all routes
+    const extent = ol.extent.createEmpty();
+    ol.extent.extend(extent, riderRouteFeature.getGeometry().getExtent());
+    ol.extent.extend(extent, userRouteFeature.getGeometry().getExtent());
+    
+    map.getView().fit(extent, {
+        padding: [80, 80, 80, 80],
+        maxZoom: 13
+    });
+    
+    // Add popup
+    const popup = document.createElement('div');
+    popup.className = 'ol-popup';
+    popup.innerHTML = `
+        <div class="ol-popup-closer"></div>
+        <div class="ol-popup-content"></div>
+    `;
+    document.body.appendChild(popup);
+    
+    const overlay = new ol.Overlay({
+        element: popup,
+        autoPan: true
+    });
+    map.addOverlay(overlay);
+    
+    const closer = popup.querySelector('.ol-popup-closer');
+    const content = popup.querySelector('.ol-popup-content');
+    
+    closer.onclick = () => {
+        overlay.setPosition(undefined);
+        return false;
+    };
+    
+    // Click event
+    map.on('click', function(evt) {
+        const feature = map.forEachFeatureAtPixel(evt.pixel, f => f);
+        
+        if (feature && feature.get('name')) {
+            const coordinate = feature.getGeometry().getCoordinates();
+            const name = feature.get('name');
+            const type = feature.get('type');
+            
+            let emoji = type === 'rider' ? '🏍️' : (type === 'pickup' ? '📍' : '🏁');
+            
+            content.innerHTML = `
+                <div class="popup-content">
+                    <div class="popup-emoji">${emoji}</div>
+                    <div class="popup-text">${name}</div>
+                </div>
+            `;
+            overlay.setPosition(coordinate);
+        }
+    });
+    
+    // Change cursor
+    map.on('pointermove', e => {
+        const hit = map.hasFeatureAtPixel(map.getEventPixel(e.originalEvent));
+        map.getTarget().style.cursor = hit ? 'pointer' : '';
+    });
+    
+    console.log('✅ Map initialized!');
+    
+    // Start navigation button
+    document.getElementById('startNavigationBtn').addEventListener('click', () => {
+        alert('🧭 Navigation started! Follow the blue route to pickup point.');
+    });
+</script>
+
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+    
+    body {
+        background: #f5f7fa;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    .container {
+        max-width: 1600px;
+        margin: 0 auto;
+        padding: 24px;
+    }
+    
+    /* Header */
+    .ride-header {
+        background: linear-gradient(135deg, #10b981, #059669);
+        padding: 32px;
+        border-radius: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+        color: white;
+        box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
+    }
+    
+    .ride-header h1 {
+        font-size: 32px;
+        margin-bottom: 8px;
+    }
+    
+    .passenger-name {
+        font-size: 18px;
+        opacity: 0.95;
+    }
+    
+    .status-badge {
+        background: rgba(255, 255, 255, 0.25);
+        padding: 12px 24px;
+        border-radius: 50px;
+        font-weight: 700;
+        font-size: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    /* Navigation Instructions */
+    .nav-instructions {
+        background: white;
+        padding: 28px;
+        border-radius: 16px;
+        margin-bottom: 24px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+    
+    .instruction-step {
+        display: flex;
+        gap: 20px;
+        padding: 20px;
+        border-radius: 12px;
+        background: #f9fafb;
+    }
+    
+    .instruction-step.active {
+        background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+        border: 2px solid #3b82f6;
+    }
+    
+    .step-icon {
+        font-size: 36px;
+        flex-shrink: 0;
+    }
+    
+    .step-content h3 {
+        font-size: 20px;
+        color: #1f2937;
+        margin-bottom: 8px;
+    }
+    
+    .route-detail {
+        font-size: 16px;
+        color: #4b5563;
+        margin-bottom: 12px;
+    }
+    
+    .via-text {
+        font-size: 14px;
+        color: #6b7280;
+        font-style: italic;
+    }
+    
+    .step-stats {
+        display: flex;
+        gap: 20px;
+        margin-top: 8px;
+    }
+    
+    .stat {
+        font-size: 14px;
+        font-weight: 600;
+        color: #3b82f6;
+    }
+    
+    .instruction-arrow {
+        text-align: center;
+        font-size: 28px;
+        color: #9ca3af;
+        margin: 12px 0;
+    }
+    
+    /* Map */
+    #map {
+        height: 650px;
+        width: 100%;
+        border-radius: 16px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+        margin: 24px 0;
+        border: 4px solid #10b981;
+    }
+    
+    /* Route Summary */
+    .route-summary {
+        background: white;
+        padding: 28px;
+        border-radius: 16px;
+        margin-bottom: 24px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+    
+    .route-summary h3 {
+        font-size: 22px;
+        color: #1f2937;
+        margin-bottom: 20px;
+    }
+    
+    .summary-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 16px;
+    }
+    
+    .summary-card {
+        background: #f9fafb;
+        padding: 20px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        transition: all 0.3s;
+    }
+    
+    .summary-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+    }
+    
+    .summary-card.highlighted {
+        background: linear-gradient(135deg, #fef3c7, #fde68a);
+        border: 2px solid #f59e0b;
+    }
+    
+    .card-icon {
+        font-size: 36px;
+    }
+    
+    .card-label {
+        font-size: 13px;
+        color: #6b7280;
+        margin-bottom: 6px;
+    }
+    
+    .card-value {
+        font-size: 20px;
+        font-weight: 700;
+        color: #1f2937;
+    }
+    
+    /* Color Legend */
+    .color-legend {
+        background: white;
+        padding: 24px;
+        border-radius: 16px;
+        margin-bottom: 24px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+    
+    .color-legend h4 {
+        font-size: 18px;
+        color: #1f2937;
+        margin-bottom: 16px;
+    }
+    
+    .legend-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 24px;
+    }
+    
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    
+    .legend-line {
+        width: 50px;
+        height: 8px;
+        border-radius: 4px;
+    }
+    
+    /* OpenLayers popup */
+    .ol-popup {
+        position: absolute;
+        background: white;
+        padding: 16px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        bottom: 12px;
+        left: -50px;
+        min-width: 150px;
+    }
+    
+    .ol-popup:after {
+        top: 100%;
+        border: solid transparent;
+        content: " ";
+        height: 0;
+        width: 0;
+        position: absolute;
+        border-top-color: white;
+        border-width: 10px;
+        left: 48px;
+        margin-left: -10px;
+    }
+    
+    .ol-popup-closer {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        cursor: pointer;
+        font-size: 18px;
+        color: #6b7280;
+    }
+    
+    .ol-popup-closer:after {
+        content: "✕";
+    }
+    
+    .popup-content {
+        text-align: center;
+    }
+    
+    .popup-emoji {
+        font-size: 32px;
+        margin-bottom: 8px;
+    }
+    
+    .popup-text {
+        font-size: 16px;
+        font-weight: 600;
+        color: #1f2937;
+    }
+    
+    /* Actions */
+    .actions {
+        display: flex;
+        gap: 16px;
+        justify-content: center;
+    }
+    
+    .btn {
+        padding: 16px 32px;
+        border: none;
+        border-radius: 12px;
+        font-size: 18px;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        transition: all 0.3s;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+    
+    .btn-primary {
+        background: linear-gradient(135deg, #10b981, #059669);
+        color: white;
+    }
+    
+    .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 16px rgba(16, 185, 129, 0.3);
+    }
+    
+    .btn-secondary {
+        background: #6b7280;
+        color: white;
+    }
+    
+    .btn-secondary:hover {
+        background: #4b5563;
+        transform: translateY(-2px);
+    }
+    
+    @media (max-width: 768px) {
+        #map {
+            height: 500px;
+        }
+        
+        .summary-cards {
+            grid-template-columns: 1fr;
+        }
+        
+        .actions {
+            flex-direction: column;
+        }
+    }
+</style>
+{% endblock %}
