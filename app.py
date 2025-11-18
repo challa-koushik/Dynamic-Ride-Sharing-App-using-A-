@@ -6,7 +6,10 @@ import math
 import socket
 from a_star import find_path, get_all_cities
 import os
+
+# Detect Render environment
 IS_RENDER = os.environ.get('RENDER') == 'true'
+
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-this-in-production')
 
@@ -833,4 +836,5 @@ if __name__ == '__main__':
     
 
     app.run(host='0.0.0.0', port=8000, debug=True)
+
 
