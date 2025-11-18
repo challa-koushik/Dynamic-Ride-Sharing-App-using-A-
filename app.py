@@ -7,7 +7,7 @@ import socket
 from a_star import find_path, get_all_cities
 import os
 
-# Detect Render environment
+# Detect Render
 IS_RENDER = os.environ.get('RENDER') == 'true'
 
 app = Flask(__name__)
@@ -69,6 +69,16 @@ def init_db():
     conn.commit()
     conn.close()
     print("✅ Database initialized at:", db_path)
+
+# Use Flask's before_first_request (runs once before first request)
+_db_initialized = False
+
+@app.before_request
+def initialize_database():
+    global _db_initialized
+    if not _db_initialized:
+        init_db()
+        _db_initialized = True
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     """Calculate distance between two points using Haversine formula"""
@@ -836,5 +846,6 @@ if __name__ == '__main__':
     
 
     app.run(host='0.0.0.0', port=8000, debug=True)
+
 
 
