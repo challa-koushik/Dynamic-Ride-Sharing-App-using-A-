@@ -10,6 +10,13 @@ IS_RENDER = os.environ.get('RENDER') == 'true'
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key-change-this-in-production')
 
+def get_db():
+    """Get database connection with Row factory"""
+    db_path = '/tmp/rideshare.db' if IS_RENDER else 'rideshare.db'
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
 def init_db():
     """Initialize database with all required tables"""
     db_path = '/tmp/rideshare.db' if IS_RENDER else 'rideshare.db'
@@ -59,13 +66,6 @@ def init_db():
     conn.commit()
     conn.close()
     print("✅ Database initialized at:", db_path)
-
- def get_db():
-    """Get database connection with Row factory"""
-    db_path = '/tmp/rideshare.db' if IS_RENDER else 'rideshare.db'
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     """Calculate distance between two points using Haversine formula"""
@@ -833,3 +833,4 @@ if __name__ == '__main__':
     
 
     app.run(host='0.0.0.0', port=8000, debug=True)
+
